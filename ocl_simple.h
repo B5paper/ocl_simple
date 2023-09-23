@@ -144,6 +144,66 @@ struct OclEnv
     cl_command_queue command_queue;
     unordered_map<string, OclBuf> bufs;
     unordered_map<string, OclKern> kerns;
+
+    void add_buf(string buf_name, int elm_size, int elm_num) {
+        bufs.emplace(
+            piecewise_construct,
+            forward_as_tuple(buf_name),
+            forward_as_tuple(buf_name.c_str(), context, elm_size, elm_num)
+        );
+    }
+
+    void add_buf(string buf_name, int elm_size, int elm_num, void *src) {
+        bufs.emplace(
+            piecewise_construct,
+            forward_as_tuple(buf_name),
+            forward_as_tuple(buf_name.c_str(), context, elm_size, elm_num)
+        );
+
+        write_buf(buf_name, src);
+    }
+
+    void del_buf(string buf_name) {
+        bufs.erase(buf_name);
+    }
+
+    void write_buf(OclBuf &buf, void *src)
+    {
+        int ret;
+        ret = clEnqueueWriteBuffer(command_queue, buf.buf, CL_TRUE, 0, buf.size, src, 0, NULL, NULL);
+        if (ret != CL_SUCCESS)
+        {
+            cout << "fail to write buffer" << endl;
+            exit(-1);
+        }
+    }
+
+    void write_buf(string buf_name, void *src)
+    {
+        OclBuf &buf = bufs.at(buf_name);
+        write_buf(buf, src);
+    }
+
+    void read_buf(void *dst, OclBuf &buf)
+    {
+        int ret;
+        ret = clEnqueueReadBuffer(command_queue, buf.buf, CL_TRUE, 0, buf.size, dst, 0, NULL, NULL);
+        if (ret != CL_SUCCESS)
+        {
+            cout << "fail to read buffer" << endl;
+            exit(-1);
+        }
+    }
+
+    void read_buf(void *dst, string buf_name)
+    {
+        OclBuf &buf = bufs.at(buf_name);
+        read_buf(dst, buf);
+    }
+
+    template<typename... Args>
+    void run_kernel(string kern_name, vector<size_t> global_work_size, Args&&...args);
+
     ~OclEnv() {
         cout << "[Warning] destroy ocl env" << endl;
     }
@@ -369,6 +429,14 @@ void run_kernel(string kern_name, OclEnv &ocl_env, vector<size_t> global_work_si
     OclKern &k = ocl_env.kerns.at(kern_name);
     set_args_with_env(k, ocl_env, args...);
     _run_kern(k, global_work_size, ocl_env);
+}
+
+template<typename... Args>
+void OclEnv::run_kernel(string kern_name, vector<size_t> global_work_size, Args&&...args)
+{
+    OclKern &k = (*this).kerns.at(kern_name);
+    set_args_with_env(k, *this, args...);
+    _run_kern(k, global_work_size, *this);
 }
 
 

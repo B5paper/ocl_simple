@@ -6,3 +6,6 @@ ocl_simple.o: ocl_simple.cpp ocl_simple.h
 
 test: test.cpp ocl_simple.h
 	g++ -g test.cpp -lOpenCL -o test
+
+clean:
+	rm -f test *.o

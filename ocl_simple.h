@@ -135,6 +135,9 @@ class OclKern
     int cur_arg_idx;
 };
 
+struct OclEnv;
+void init_ocl(OclEnv &ocl_env, string program_path, vector<string> program_names);
+
 struct OclEnv
 {
     cl_platform_id platform_id;
@@ -144,6 +147,10 @@ struct OclEnv
     cl_command_queue command_queue;
     unordered_map<string, OclBuf> bufs;
     unordered_map<string, OclKern> kerns;
+
+    OclEnv(string program_path, vector<string> kernel_names) {
+        init_ocl(*this, program_path, kernel_names);
+    }
 
     void add_buf(string buf_name, int elm_size, int elm_num) {
         bufs.emplace(

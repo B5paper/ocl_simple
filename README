@@ -13,7 +13,7 @@ make test
 Run example:
 
 ```bash
-./run.sh test
+./test
 ```
 
 Usage:

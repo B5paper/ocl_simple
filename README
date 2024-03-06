@@ -19,3 +19,65 @@ Run example:
 Usage:
 
 see `test.cpp`.
+
+## global opencl env
+
+compile lib:
+
+```bash
+make libglobal_ocl_env.so
+```
+
+usage:
+
+`test_global.cpp`:
+
+```cpp
+#include "global_ocl_env.h"
+
+int main()
+{
+    init_global_ocl_env("./kernels.cl", {"add", "times"});
+
+    float a = 1, b = 2, c;
+    add_buf("a", sizeof(float), 1, &a);
+    add_buf("b", sizeof(float), 1, &b);
+    add_buf("c", sizeof(float), 1);
+
+    run_kern("add", {1}, "a", "b", "c");
+    read_buf(&c, "c");
+    printf("%f + %f = %f\n", a, b, c);
+
+    run_kern("times", {1}, a, b, "c");
+    read_buf(&c, "c");
+    printf("%f * %f = %f\n", a, b, c);
+
+    del_buf("c");
+
+    return 0;
+}
+```
+
+compile:
+
+```bash
+g++ -g test_global.cpp -L. -lglobal_ocl_env -lOpenCL -o test_global
+```
+
+run:
+
+```bash
+./run.sh test_global
+```
+
+output:
+
+```
+opencl device name: gfx1034
+1.000000 + 2.000000 = 3.000000
+1.000000 * 2.000000 = 2.000000
+release ocl buffer: c
+[Warning] destroy ocl env
+release ocl buffer: b
+release ocl buffer: a
+```

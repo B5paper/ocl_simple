@@ -1,2 +1,6 @@
 .vscode
 *.so
+*.o
+test
+test_global
+

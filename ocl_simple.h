@@ -191,6 +191,18 @@ struct OclEnv
         write_buf(buf, src);
     }
 
+    void write_buf(string buf_name, void *src, size_t off_elm_num, size_t write_elm_num)
+    {
+        OclBuf &buf = bufs.at(buf_name);
+        int ret;
+        ret = clEnqueueWriteBuffer(command_queue, buf.buf, CL_TRUE, off_elm_num * buf.elm_size, write_elm_num * buf.elm_size, src, 0, NULL, NULL);
+        if (ret != CL_SUCCESS)
+        {
+            cout << "fail to write buffer" << endl;
+            exit(-1);
+        }
+    }
+
     void read_buf(void *dst, OclBuf &buf)
     {
         int ret;
@@ -207,6 +219,9 @@ struct OclEnv
         OclBuf &buf = bufs.at(buf_name);
         read_buf(dst, buf);
     }
+
+    template<typename... Args>
+    void run_kernel(string kern_name, vector<size_t> global_work_size);
 
     template<typename... Args>
     void run_kernel(string kern_name, vector<size_t> global_work_size, Args&&...args);
@@ -439,6 +454,14 @@ void run_kernel(string kern_name, OclEnv &ocl_env, vector<size_t> global_work_si
 }
 
 template<typename... Args>
+void OclEnv::run_kernel(string kern_name, vector<size_t> global_work_size)
+{
+    OclKern &k = (*this).kerns.at(kern_name);
+    // set_args_with_env(k, *this);
+    _run_kern(k, global_work_size, *this);
+}
+
+template<typename... Args>
 void OclEnv::run_kernel(string kern_name, vector<size_t> global_work_size, Args&&...args)
 {
     OclKern &k = (*this).kerns.at(kern_name);
@@ -446,6 +469,23 @@ void OclEnv::run_kernel(string kern_name, vector<size_t> global_work_size, Args&
     _run_kern(k, global_work_size, *this);
 }
 
+ostream& operator<<(ostream &cout, cl_float3 &vec)
+{
+    cout << "[";
+    for (int i = 0; i < 3; ++i)
+        cout << vec.s[i] << ", ";
+    cout << vec.s[3] << "]";
+    return cout;
+}
+
+// ostream& operator<<(ostream &cout, cl_float4 &vec)
+// {
+//     cout << "[";
+//     for (int i = 0; i < 3; ++i)
+//         cout << vec.s[i] << ", ";
+//     cout << vec.s[3] << "]";
+//     return cout;
+// }
 
 
 #endif

@@ -36,6 +36,17 @@ void write_buf(string buf_name, void *src)
     pocl_env->write_buf(buf_name, src);
 }
 
+void write_buf(string buf_name, void *src, size_t off_elm_num, size_t write_elm_num)
+{
+    pocl_env->write_buf(buf_name, src, off_elm_num, write_elm_num);
+}
+
+template<typename ...Args>
+void run_kern(string kernel_name, vector<size_t> work_sizes)
+{
+    pocl_env->run_kernel(kernel_name, work_sizes);
+}
+
 template<typename ...Args>
 void run_kern(string kernel_name, vector<size_t> work_sizes, Args ...args)
 {

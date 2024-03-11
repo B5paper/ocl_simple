@@ -8,3 +8,8 @@ kernel void times(float a, float b, global float *c)
 {
     *c = a * b;
 }
+
+kernel void assign_A_to_B(global int *A, global int *B)
+{
+	*B = *A;
+}

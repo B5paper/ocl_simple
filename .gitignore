@@ -3,4 +3,4 @@
 *.o
 test
 test_global
-
+test_simple_ocl

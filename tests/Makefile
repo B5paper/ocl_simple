@@ -1,4 +1,4 @@
-default: test test_global
+default: test test_global test_simple_ocl
 
 rebuild:
 	cd .. && make
@@ -9,3 +9,6 @@ test: test.cpp
 
 test_global: test_global.cpp
 	g++ -g test_global.cpp -I.. -L.. -lglobal_ocl_env -lOpenCL -o test_global
+
+test_simple_ocl: test_simple_ocl.cpp
+	g++ -g test_simple_ocl.cpp -lOpenCL -o test_simple_ocl

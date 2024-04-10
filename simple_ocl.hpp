@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <fstream>
 #include <iostream>
+#include <memory.h>
 using namespace std;
 
 class OclBuf
@@ -138,6 +139,32 @@ class OclKern
     int cur_arg_idx;
 };
 
+// add the cpu memory allocation and deallocation
+// 如果这里使用 vector<T>，那么其实 elm_size 就已经失去了意义
+// 对 gpu mem 来说，类型 T 没有意义，只需要 mem size 和 stride 就够了
+// 所以还不如在运行时显式解释数据的类型
+class OclBufMem: public OclBuf
+{
+    public:
+    OclBufMem(string name, size_t elm_size, size_t elm_num, cl_context ctx)
+    : OclBuf(name, elm_size, elm_num, ctx)
+    {
+        mem = malloc(elm_size * elm_num);
+    }
+
+    ~OclBufMem() {
+        printf("release buf mem: %s, %d bytes\n", name.c_str(), size);
+        free(mem);
+    }
+
+    template<typename T>
+    T& at(size_t idx) {
+        return *((T*)mem+idx);
+    }
+
+    void *mem;
+};
+
 struct OclEnv
 {
     cl_platform_id plat;
@@ -149,6 +176,8 @@ struct OclEnv
 	cl_command_queue cmd_que;
     unordered_map<string, OclBuf> bufs;
     unordered_map<string, OclKern> kerns;
+    // unordered_map<string, OclBufMem> buf_mems;
+    unordered_map<string, void*> mems;
 
     OclEnv(string program_path, vector<string> kernel_names)
 	{
@@ -271,8 +300,52 @@ struct OclEnv
         write_buf(buf_name, src);
     }
 
+    void add_buf_mem(string buf_name, int elm_size, int elm_num) {
+        add_buf(buf_name, elm_size, elm_num);
+        void *mem = malloc(elm_size * elm_num);
+        mems.emplace(
+            piecewise_construct,
+            forward_as_tuple(buf_name),
+            forward_as_tuple(mem)
+        );
+    }
+
+    void add_buf_mem(string buf_name, int elm_size, int elm_num, void *src) {
+        add_buf(buf_name, elm_size, elm_num);
+        size_t size = elm_size * elm_num;
+        write_buf(buf_name, src);
+        void *mem = malloc(size);
+        memcpy(mem, src, size);
+        mems.emplace(
+            piecewise_construct,
+            forward_as_tuple(buf_name),
+            forward_as_tuple(mem)
+        );
+    }
+
+    void sync_gpu_to_cpu(vector<string> buf_names) {
+        for (string &buf_name: buf_names) {
+            void *mem = mems.at(buf_name);
+            OclBuf &buf = bufs.at(buf_name);
+            read_buf(mem, buf);
+        }
+    }
+
+    void sync_cpu_to_gpu(vector<string> buf_names) {
+        for (string &buf_name: buf_names) {
+            void *mem = mems.at(buf_name);
+            OclBuf &buf = bufs.at(buf_name);
+            write_buf(buf, mem);
+        }
+    }
+
     void del_buf(string buf_name) {
         bufs.erase(buf_name);
+    }
+
+    void del_buf_mem(string buf_name) {
+        bufs.erase(buf_name);
+        free(mems.at(buf_name));
     }
 
     void write_buf(OclBuf &buf, void *src)
@@ -291,6 +364,32 @@ struct OclEnv
         OclBuf &buf = bufs.at(buf_name);
         write_buf(buf, src);
     }
+
+    // void transfer_mem_to_buf(string buf_name)
+    // {
+    //     OclBufMem &buf_mem = buf_mems.at(buf_name);
+    //     cl_mem &buf = buf_mem.buf;
+    //     int ret;
+    //     ret = clEnqueueWriteBuffer(cmd_que, buf, CL_TRUE, 0, buf_mem.size, buf_mem.mem, 0, NULL, NULL);
+    //     if (ret != CL_SUCCESS)
+    //     {
+    //         cout << "fail to write buffer" << endl;
+    //         exit(-1);
+    //     }
+    // }
+
+    // void transfer_buf_to_mem(string buf_name)
+    // {
+    //     OclBufMem &buf_mem = buf_mems.at(buf_name);
+    //     cl_mem &buf = buf_mem.buf;
+    //     int ret;
+    //     ret = clEnqueueReadBuffer(cmd_que, buf, CL_TRUE, 0, buf_mem.size, buf_mem.mem, 0, NULL, NULL);
+    //     if (ret != CL_SUCCESS)
+    //     {
+    //         cout << "fail to read buffer" << endl;
+    //         exit(-1);
+    //     }
+    // }
 
     void write_buf(string buf_name, void *src, size_t off_elm_num, size_t write_elm_num)
     {
@@ -338,6 +437,10 @@ struct OclEnv
 
     ~OclEnv() {
         cout << "[Warning] destroy ocl env" << endl;
+        for (auto &mem: mems) {
+            printf("release mem: %s\n", mem.first.c_str());
+            free(mem.second);
+        }
     }
 };
 
@@ -359,6 +462,24 @@ void add_buf(string buf_name, size_t elm_size, size_t elm_num)
 void add_buf(string buf_name, size_t elm_size, size_t elm_num, void *src)
 {
 	global_ocl_env->add_buf(buf_name, elm_size, elm_num, src);
+}
+
+void* add_buf_mem(string buf_name, int elm_size, int elm_num) {
+    global_ocl_env->add_buf_mem(buf_name, elm_size, elm_num);
+    return global_ocl_env->mems.at(buf_name);
+}
+
+void* add_buf_mem(string buf_name, int elm_size, int elm_num, void *src) {
+    global_ocl_env->add_buf_mem(buf_name, elm_size, elm_num, src);
+    return global_ocl_env->mems.at(buf_name);
+}
+
+void sync_cpu_to_gpu(vector<string> buf_names) {
+    global_ocl_env->sync_cpu_to_gpu(buf_names);
+}
+
+void sync_gpu_to_cpu(vector<string> buf_names) {
+    global_ocl_env->sync_gpu_to_cpu(buf_names);
 }
 
 void del_buf(string buf_name)

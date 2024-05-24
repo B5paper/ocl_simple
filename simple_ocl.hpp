@@ -124,18 +124,6 @@ class OclKern
     // 不能在类的声明里进行模板的偏特化，所以这里直接选择放弃偏特化，重载了函数
     OclKern& sa(OclBuf &arg) {
         int ret;
-        // cl_kernel_arg_address_qualifier addr_qlf;
-        // ret = clGetKernelArgInfo(kernel, cur_arg_idx, CL_KERNEL_ARG_ADDRESS_QUALIFIER, sizeof(addr_qlf), &addr_qlf, NULL);
-        // if (ret != CL_SUCCESS)
-        // {
-        //     printf("fail to get kernel arg info\n");
-        //     exit(-1);
-        // }
-        // if (addr_qlf == CL_KERNEL_ARG_ADDRESS_LOCAL)
-        // {
-        //     ret = clSetKernelArg(kernel, cur_arg_idx, sizeof(cl_mem), NULL);
-        // }
-
         ret = clSetKernelArg(kernel, cur_arg_idx, sizeof(cl_mem), &arg.buf);  // 之所以要重载函数，是因为对于 OclBuf 类型，这里需要 .buf
         cur_arg_idx += 1;
         if (ret != CL_SUCCESS)
@@ -548,6 +536,11 @@ void add_buf(string buf_name, size_t elm_size, size_t elm_num)
 void add_buf(string buf_name, size_t elm_size, size_t elm_num, void *src)
 {
 	global_ocl_env->add_buf(buf_name, elm_size, elm_num, src);
+}
+
+void add_local_buf(string buf_name, size_t elm_size, size_t elm_num)
+{
+    global_ocl_env->add_local_buf(buf_name, elm_size, elm_num);
 }
 
 void* add_buf_mem(string buf_name, int elm_size, int elm_num) {

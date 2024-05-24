@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory.h>
+#include <type_traits>
 using namespace std;
 
 class OclBuf
@@ -49,6 +50,27 @@ class OclBuf
 	cl_context ctx;
 };
 
+class OclLocalBuf
+{
+    public:
+    OclLocalBuf(string name, size_t elm_size, size_t elm_num, cl_context context) {
+        ctx = context;
+        this->name = name;
+        this->elm_num = elm_num;
+        this->elm_size = elm_size;
+        this->buf_size = elm_num * elm_size;
+    }
+
+    public:
+    string name;
+    int elm_size;
+    int elm_num;
+    int buf_size;
+
+    private:
+    cl_context ctx;
+};
+
 class OclKern
 {
     public:
@@ -87,9 +109,33 @@ class OclKern
         return *this;
     }
 
+    OclKern& sa(OclLocalBuf &arg) {
+        int ret;
+        ret = clSetKernelArg(kernel, cur_arg_idx, arg.buf_size, NULL);
+        if (ret != CL_SUCCESS)
+        {
+            cout << "fail to set kernel arg" << endl;
+            exit(-1);
+        }
+        cur_arg_idx += 1;
+        return *this;
+    }
+
     // 不能在类的声明里进行模板的偏特化，所以这里直接选择放弃偏特化，重载了函数
     OclKern& sa(OclBuf &arg) {
         int ret;
+        // cl_kernel_arg_address_qualifier addr_qlf;
+        // ret = clGetKernelArgInfo(kernel, cur_arg_idx, CL_KERNEL_ARG_ADDRESS_QUALIFIER, sizeof(addr_qlf), &addr_qlf, NULL);
+        // if (ret != CL_SUCCESS)
+        // {
+        //     printf("fail to get kernel arg info\n");
+        //     exit(-1);
+        // }
+        // if (addr_qlf == CL_KERNEL_ARG_ADDRESS_LOCAL)
+        // {
+        //     ret = clSetKernelArg(kernel, cur_arg_idx, sizeof(cl_mem), NULL);
+        // }
+
         ret = clSetKernelArg(kernel, cur_arg_idx, sizeof(cl_mem), &arg.buf);  // 之所以要重载函数，是因为对于 OclBuf 类型，这里需要 .buf
         cur_arg_idx += 1;
         if (ret != CL_SUCCESS)
@@ -120,10 +166,33 @@ class OclKern
         _set_args(args...);
     }
 
-    void nd_range(vector<size_t> global_work_size, cl_command_queue command_queue) {
+    void nd_range(vector<size_t> global_work_size, cl_command_queue command_queue)
+    {
         uint work_dim = global_work_size.size();
         int ret;
         ret = clEnqueueNDRangeKernel(command_queue, kernel, work_dim, NULL, global_work_size.data(), NULL, 0, NULL, NULL);
+        
+        if (ret != CL_SUCCESS)
+        {
+            cout << "fail to run kernel" << endl;
+            exit(-1);
+        }
+    }
+
+    void nd_range(vector<size_t> global_work_size, vector<size_t> local_work_size,
+        cl_command_queue command_queue)
+    {
+        uint work_dim = global_work_size.size();
+        int ret;
+        if (local_work_size.empty())
+        {
+            ret = clEnqueueNDRangeKernel(command_queue, kernel, work_dim, NULL, global_work_size.data(), NULL, 0, NULL, NULL);
+        }
+        else
+        {
+            ret = clEnqueueNDRangeKernel(command_queue, kernel, work_dim, NULL, global_work_size.data(), local_work_size.data(), 0, NULL, NULL);
+        }
+        
         if (ret != CL_SUCCESS)
         {
             cout << "fail to run kernel" << endl;
@@ -178,6 +247,7 @@ struct OclEnv
     unordered_map<string, OclKern> kerns;
     // unordered_map<string, OclBufMem> buf_mems;
     unordered_map<string, void*> mems;
+    unordered_map<string, OclLocalBuf> local_bufs;
 
     OclEnv(string program_path, vector<string> kernel_names)
 	{
@@ -420,6 +490,16 @@ struct OclEnv
         read_buf(dst, buf);
     }
 
+    void add_local_buf(string buf_name, int elm_size, int elm_num)
+    {
+        int buf_size = elm_size * elm_num;
+        local_bufs.emplace(
+            piecewise_construct,
+            forward_as_tuple(buf_name), 
+            forward_as_tuple(buf_name, elm_size, elm_num, ctx)
+        );
+    }
+
     template<typename... Args>
     void run_kernel(string kern_name, vector<size_t> global_work_size)
 	{
@@ -452,6 +532,12 @@ unique_ptr<OclEnv> global_ocl_env;
 void init_ocl_env(string program_path, vector<string> kernel_names)
 {
 	global_ocl_env = make_unique<OclEnv>(program_path, kernel_names);
+}
+
+void exit_ocl_env()
+{
+    OclEnv *p_ocl_env = global_ocl_env.release();
+    delete p_ocl_env;
 }
 
 void add_buf(string buf_name, size_t elm_size, size_t elm_num)
@@ -492,43 +578,76 @@ void write_buf(string buf_name, void *src)
 	global_ocl_env->write_buf(buf_name, src);
 }
 
-void read_buf(void *src, string buf_name)
+void read_buf(void *dst, string buf_name)
 {
-	global_ocl_env->read_buf(src, buf_name);
+	global_ocl_env->read_buf(dst, buf_name);
 }
 
 // 因为现在是 global 环境了，所以默认字符串都对应到 cl_mem 上，不再使用原本的类型了
 // 感觉只要进了 OclEnv 这个环境里，都要按照这个规则来，以后有时间了把 OclEnv 中的 run_kernel() 也改一下吧
 template<typename T>
-void _set_args(OclKern &kern, T arg)
+enable_if_t<is_same_v<T, const char*>, void>
+_set_args(OclKern &kern, T arg)
 {
-    if (typeid(arg) == typeid(const char*) ||
-		typeid(arg) == typeid(char*) ||
-		typeid(arg) == typeid(string))
-	{
-		OclBuf &buf = global_ocl_env->bufs.at(arg);
-        kern.sa(buf);
-	}
-    else
-    {
-        kern.sa(arg);
-    }
+    // if (typeid(arg) == typeid(const char*) ||
+	// 	typeid(arg) == typeid(char*) ||
+	// 	typeid(arg) == typeid(string))
+	// {
+		
+        if (global_ocl_env->bufs.find(arg) != global_ocl_env->bufs.end())
+        {
+            OclBuf &buf = global_ocl_env->bufs.at(arg);
+            kern.sa(buf);
+        }
+        else if (global_ocl_env->local_bufs.find(arg) != global_ocl_env->local_bufs.end())
+        {
+            OclLocalBuf &local_buf = global_ocl_env->local_bufs.at(arg);
+            kern.sa(local_buf);
+        }
+        else
+        {
+            printf("string can't be converted to a buffer\n");
+            exit(-1);
+        }
+        
+	// }
+}
+
+template<typename T>
+enable_if_t<!is_same_v<T, const char*>, void>
+_set_args(OclKern &kern, T arg)
+{
+    kern.sa(arg);   
 }
 
 template<typename T, typename...Args>
-void _set_args(OclKern &kern, T arg, Args...args)
+enable_if_t<is_same_v<T, const char*>, void>
+_set_args(OclKern &kern, T arg, Args...args)
 {
-    if (typeid(arg) == typeid(const char*) ||
-		typeid(arg) == typeid(char*) ||
-		typeid(arg) == typeid(string))
-	{
-		OclBuf &buf = global_ocl_env->bufs.at(arg);
+    if (global_ocl_env->bufs.find(arg) != global_ocl_env->bufs.end())
+    {
+        OclBuf &buf = global_ocl_env->bufs.at(arg);
         kern.sa(buf);
-	}
+    }
+    else if (global_ocl_env->local_bufs.find(arg) != global_ocl_env->local_bufs.end())
+    {
+        OclLocalBuf &local_buf = global_ocl_env->local_bufs.at(arg);
+        kern.sa(local_buf);
+    }
     else
     {
-        kern.sa(arg);
+        printf("string can't be converted to a buffer\n");
+        exit(-1);
     }
+
+    _set_args(kern, args...);
+}
+
+template<typename T, typename...Args>
+enable_if_t<!is_same_v<T, const char*>, void>
+_set_args(OclKern &kern, T arg, Args...args)
+{
+    kern.sa(arg);
     _set_args(kern, args...);
 }
 
@@ -541,18 +660,37 @@ void _set_kernel_args(string kernel_name, Args...args)
     _set_args(kern, args...);
 }
 
-void run_kern(string kernel_name, vector<size_t> global_work_size)
+void run_kern(string kernel_name,vector<size_t> global_work_size)
 {
     OclKern &kern = global_ocl_env->kerns.at(kernel_name);
     kern.nd_range(global_work_size, global_ocl_env->cmd_que);
 }
 
+void run_kern(string kernel_name,
+    vector<size_t> global_work_size, vector<size_t> local_work_size)
+{
+    OclKern &kern = global_ocl_env->kerns.at(kernel_name);
+    kern.nd_range(global_work_size, local_work_size, global_ocl_env->cmd_que);
+}
+
 template<typename...Args>
-void run_kern(string kernel_name, vector<size_t> global_work_size, Args...args)
+void run_kern(string kernel_name,
+    vector<size_t> global_work_size,
+    Args...args)
 {
     _set_kernel_args(kernel_name, args...);
     OclKern &kern = global_ocl_env->kerns.at(kernel_name);
     kern.nd_range(global_work_size, global_ocl_env->cmd_que);
+}
+
+template<typename...Args>
+void run_kern(string kernel_name,
+    vector<size_t> global_work_size, vector<size_t> local_work_size,
+    Args...args)
+{
+    _set_kernel_args(kernel_name, args...);
+    OclKern &kern = global_ocl_env->kerns.at(kernel_name);
+    kern.nd_range(global_work_size, local_work_size, global_ocl_env->cmd_que);
 }
 
 
